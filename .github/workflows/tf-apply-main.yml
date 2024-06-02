@@ -29,20 +29,20 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set Account ID
       id: account
       run: |
         ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+        echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
         echo "Account ID: $ACCOUNT_ID"
-        echo "::set-output name=ACCOUNT_ID::$ACCOUNT_ID"
 
     - name: Check previous AWSGoat Deployment
       id: check 
       run: |
         echo "Checking for previous deployment..."
-        aws s3api head-object --bucket do-not-delete-awsgoat-state-files-${{ steps.account.outputs.ACCOUNT_ID }} --key terraform.tfstate || echo "No previous deployment found"
+        aws s3api head-object --bucket do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }} --key terraform.tfstate || echo "No previous deployment found"
       continue-on-error: true
 
     - name: Exit if previous deployment exists
@@ -52,7 +52,7 @@ jobs:
         exit 1
 
     - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v1
+      uses: hashicorp/setup-terraform@v2
 
     - name: Check Terraform and AWS CLI installation
       run: |
@@ -68,7 +68,7 @@ jobs:
           exit 1
         fi
         
-    - uses: actions/setup-python@v2
+    - uses: actions/setup-python@v4
       with:
         python-version: 3
 
@@ -105,7 +105,7 @@ jobs:
       if: always()
       run: |
         cd modules/${{ github.event.inputs.module }}
-        aws s3 cp ./terraform.tfstate s3://do-not-delete-awsgoat-state-files-${{ steps.account.outputs.ACCOUNT_ID }}/terraform.tfstate 
+        aws s3 cp ./terraform.tfstate s3://do-not-delete-awsgoat-state-files-${{ env.ACCOUNT_ID }}/terraform.tfstate 
         if [ $? -ne 0 ]; then
           echo "Failed to copy terraform.tfstate to S3"
           exit 1
