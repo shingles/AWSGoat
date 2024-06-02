@@ -1,6 +1,5 @@
 name: 'Terraform Apply'
 
-
 on:
   workflow_dispatch:
     inputs:
@@ -35,32 +34,45 @@ jobs:
     - name: Set Account ID
       id: account
       run: |
-        echo "::set-output name=ACCOUNT_ID::$(aws sts get-caller-identity --query Account --output text)"
+        ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+        echo "Account ID: $ACCOUNT_ID"
+        echo "::set-output name=ACCOUNT_ID::$ACCOUNT_ID"
 
     - name: Check previous AWSGoat Deployment
       id: check 
       run: |
-        echo $ACCOUNT_ID
-        aws s3api head-object --bucket do-not-delete-awsgoat-state-files-${{ steps.account.outputs.ACCOUNT_ID }} --key terraform.tfstate
+        echo "Checking for previous deployment..."
+        aws s3api head-object --bucket do-not-delete-awsgoat-state-files-${{ steps.account.outputs.ACCOUNT_ID }} --key terraform.tfstate || echo "No previous deployment found"
       continue-on-error: true
 
     - name: Exit if previous deployment exists
-      if: steps.check.outcome == 'success' 
+      if: steps.check.outcome == 'success'
       run: |
         echo "A Previous AWSGoat deployment exists, run the Terraform Destroy Action"
         exit 1
 
-    # Initialize a new or existing Terraform working directory 
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v1
+
+    - name: Check Terraform and AWS CLI installation
+      run: |
+        terraform -version
+        aws --version
+
     - name: Terraform Init
       run: | 
         cd modules/${{ github.event.inputs.module }}
         terraform init 
+        if [ $? -ne 0 ]; then
+          echo "Terraform init failed"
+          exit 1
+        fi
         
-    # Installs boto3
     - uses: actions/setup-python@v2
       with:
         python-version: 3
-    - name: install
+
+    - name: Install boto3
       run: |
         pip install boto3
     
@@ -69,6 +81,10 @@ jobs:
       run: | 
         cd modules/${{ github.event.inputs.module }}
         terraform plan -input=false
+        if [ $? -ne 0 ]; then
+          echo "Terraform plan failed"
+          exit 1
+        fi
       continue-on-error: false
       
     - name: Terraform Plan Status
@@ -79,17 +95,27 @@ jobs:
       run: | 
         cd modules/${{ github.event.inputs.module }}
         terraform apply -auto-approve -input=false
+        if [ $? -ne 0 ]; then
+          echo "Terraform apply failed"
+          exit 1
+        fi
       continue-on-error: false
 
-    # Copy tfstate file to s3 bucket
-    - name: Copy terraform.tfstate file to s3bucket
+    - name: Copy terraform.tfstate file to s3 bucket
       if: always()
       run: |
         cd modules/${{ github.event.inputs.module }}
         aws s3 cp ./terraform.tfstate s3://do-not-delete-awsgoat-state-files-${{ steps.account.outputs.ACCOUNT_ID }}/terraform.tfstate 
+        if [ $? -ne 0 ]; then
+          echo "Failed to copy terraform.tfstate to S3"
+          exit 1
+        fi
 
-    # Terraform Output the API Gateway url
     - name: Application URL
       run: |
         cd modules/${{ github.event.inputs.module }}
         terraform output
+        if [ $? -ne 0 ]; then
+          echo "Terraform output failed"
+          exit 1
+        fi
